@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>BASS FEVER - モバイルバスフィッシング</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=M+PLUS+1p:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    
+    <!-- 1. タイトル画面 -->
+    <div id="screen-title" class="screen active">
+      <div class="brand">
+        <span class="sub-title">MOBILE BASS FISHING GAME</span>
+        <img class="main-title logo-image" src="IMG_9168.png" alt="タイトルロゴ">
+      </div>
+      <div class="tap-to-start">
+        <button id="btn-start" class="btn-primary">TAP TO START</button>
+      </div>
+      <div class="note">※音量をONにしてお楽しみください。バイブレーション機能はAndroid端末のみ対応です。</div>
+    </div>
+
+    <!-- 2. キャスト待ち画面 -->
+    <div id="screen-cast" class="screen">
+      <div class="hud">
+        <div class="instruction">水面をタップしてルアーをキャスト！</div>
+      </div>
+      <div id="water-surface" class="water-surface">
+        <div class="ripple-hint"></div>
+      </div>
+    </div>
+
+    <!-- 3. ファイト画面 -->
+    <div id="screen-fight" class="screen">
+      <!-- 左端の距離表示バー -->
+      <div class="depth-meter-container">
+        <div class="depth-number"><span id="txt-distance">15.0</span><span class="depth-unit">m</span></div>
+        <div class="depth-track">
+          <div id="depth-fill" class="depth-fill"></div>
+        </div>
+      </div>
+
+      <!-- 右側メインコンテンツ（ファイト・操作エリア） -->
+      <div class="main-fight-content">
+        <div class="hud-mini">
+          <div id="fish-info-fight" class="fish-info-mini">特大バス (55cm)</div>
+        </div>
+
+        <!-- ファイトエリア（魚のビジュアル表示） -->
+        <div class="fight-area">
+          <canvas id="canvas-fish" width="260" height="180"></canvas>
+        </div>
+
+        <!-- 下部操作エリア（テンションゲージとリールが一体化） -->
+        <div class="interaction-area">
+          <!-- テンションゲージ（リールの真上に配置） -->
+          <div id="tension-gauge-area" class="gauge-container">
+            <div class="gauge-labels">
+              <span>LINE TENSION</span>
+            </div>
+            <div class="tension-gauge">
+              <div id="tension-pointer" class="tension-pointer"></div>
+            </div>
+          </div>
+
+          <!-- 円ジェスチャー ＆ 左右スワイプを同時に受ける操作パッド -->
+          <div class="reel-panel">
+            <div id="reel-disc" class="reel-disc">
+              <div class="reel-knob"></div>
+              <div class="reel-center">TOUCH & REEL</div>
+            </div>
+            <span class="reel-label">指を離さず左右に動かしてバランスを取り、回して巻く！</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 結果画面 -->
+    <div id="screen-result" class="screen">
+      <div class="result-card">
+        <div id="celebration-layer" class="celebration-layer"></div>
+        <h2 id="result-title" class="result-title">LANDING SUCCESS!</h2>
+        
+        <div id="result-fish-container" class="result-fish-container">
+          <!-- メジャー付きスケール背景コンテナ -->
+          <div class="measure-board">
+            <div class="ruler-line">
+              <!-- JSで0〜60の目盛りを描画するか、CSSで目盛りラインを用意します -->
+              <div class="ruler-ticks"></div>
+            </div>
+            <img id="img-result-fish" src="fish_small.png" alt="釣り上げた魚" class="hidden">
+            <canvas id="canvas-result-fish" width="280" height="140"></canvas>
+          </div>
+        </div>
+
+        <div class="result-details">
+          <div class="detail-row">
+            <span class="label">獲物</span>
+            <span id="res-name" class="value">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">全長</span>
+            <span id="res-length" class="value">-</span>
+          </div>
+          <div class="detail-row">
+            <span class="label">重量</span>
+            <span id="res-weight" class="value">-</span>
+          </div>
+        </div>
+
+        <button id="btn-restart" class="btn-primary">NEXT CAST</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
