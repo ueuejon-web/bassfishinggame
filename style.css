@@ -151,10 +151,35 @@ html, body {
   box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
 }
 
+.title-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
 .note {
   font-size: 0.75rem;
   color: #94a3b8;
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+.credit {
+  font-size: 0.7rem;
+  color: #64748b;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+.credit a {
+  color: #10b981;
+  text-decoration: none;
+  transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+.credit a:hover {
+  color: #34d399;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
 }
 
 /* 2. キャスト画面 */
@@ -391,6 +416,97 @@ html, body {
   flex-direction: column;
   gap: 10px;
   width: 100%;
+}
+
+.fight-control-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.fight-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.fight-touch-zone {
+  width: 46px;
+  min-height: 160px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(to bottom, #ef4444 0%, #3b82f6 42%, #ffffff 100%);
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.08);
+  position: relative;
+  touch-action: none;
+}
+
+.fight-touch-zone::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.18s ease, box-shadow 0.18s ease;
+}
+
+.fight-touch-zone.active::after {
+  opacity: 1;
+}
+
+.fight-touch-zone.glow-red::after {
+  box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.9), 0 0 20px rgba(239, 68, 68, 0.35);
+  animation: glow-pulse-red 0.6s ease-in-out infinite;
+}
+
+.fight-touch-zone.glow-blue::after {
+  box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.9), 0 0 20px rgba(59, 130, 246, 0.35);
+  animation: glow-pulse-blue 0.6s ease-in-out infinite;
+}
+
+.fight-touch-zone.glow-white::after {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 18px rgba(255, 255, 255, 0.35);
+  animation: glow-pulse-white 0.6s ease-in-out infinite;
+}
+
+@keyframes glow-pulse-red {
+  0% {
+    box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.6), 0 0 10px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    box-shadow: inset 0 0 8px 1px rgba(239, 68, 68, 1), 0 0 32px rgba(239, 68, 68, 0.7);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.6), 0 0 10px rgba(239, 68, 68, 0.2);
+  }
+}
+
+@keyframes glow-pulse-blue {
+  0% {
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.6), 0 0 10px rgba(59, 130, 246, 0.2);
+  }
+  50% {
+    box-shadow: inset 0 0 8px 1px rgba(59, 130, 246, 1), 0 0 32px rgba(59, 130, 246, 0.7);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.6), 0 0 10px rgba(59, 130, 246, 0.2);
+  }
+}
+
+@keyframes glow-pulse-white {
+  0% {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6), 0 0 10px rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    box-shadow: inset 0 0 8px 1px rgba(255, 255, 255, 1), 0 0 32px rgba(255, 255, 255, 0.7);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6), 0 0 10px rgba(255, 255, 255, 0.2);
+  }
 }
 
 /* テンションゲージ */

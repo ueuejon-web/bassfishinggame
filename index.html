@@ -22,7 +22,10 @@
       <div class="tap-to-start">
         <button id="btn-start" class="btn-primary">TAP TO START</button>
       </div>
-      <div class="note">※音量をONにしてお楽しみください。バイブレーション機能はAndroid端末のみ対応です。</div>
+      <div class="title-footer">
+        <div class="note">※音量をONにしてお楽しみください。バイブレーション機能はAndroid端末のみ対応です。</div>
+        <div class="credit">Created by <a href="https://www.ueb-design.com/" target="_blank" rel="noopener noreferrer">上ブ.デザイン | CREATIVE STUDIO</a></div>
+      </div>
     </div>
 
     <!-- 2. キャスト待ち画面 -->
@@ -56,25 +59,31 @@
           <canvas id="canvas-fish" width="260" height="180"></canvas>
         </div>
 
-        <!-- 下部操作エリア（テンションゲージとリールが一体化） -->
+        <!-- 下部操作エリア（テンションゲージ・タッチエリア・リール） -->
         <div class="interaction-area">
-          <!-- テンションゲージ（リールの真上に配置） -->
-          <div id="tension-gauge-area" class="gauge-container">
-            <div class="gauge-labels">
-              <span>LINE TENSION</span>
-            </div>
-            <div class="tension-gauge">
-              <div id="tension-pointer" class="tension-pointer"></div>
-            </div>
-          </div>
+          <div class="fight-control-row">
+            <div id="fight-touch-left" class="fight-touch-zone left" aria-label="左テンションエリア"></div>
 
-          <!-- 円ジェスチャー ＆ 左右スワイプを同時に受ける操作パッド -->
-          <div class="reel-panel">
-            <div id="reel-disc" class="reel-disc">
-              <div class="reel-knob"></div>
-              <div class="reel-center">TOUCH & REEL</div>
+            <div class="fight-input-group">
+              <div id="tension-gauge-area" class="gauge-container">
+                <div class="gauge-labels">
+                  <span>LINE TENSION</span>
+                </div>
+                <div class="tension-gauge">
+                  <div id="tension-pointer" class="tension-pointer"></div>
+                </div>
+              </div>
+
+              <div class="reel-panel">
+                <div id="reel-disc" class="reel-disc">
+                  <div class="reel-knob"></div>
+                  <div class="reel-center">TOUCH & REEL</div>
+                </div>
+                <span class="reel-label">指を離さず左右に動かしてバランスを取り、回して巻く！</span>
+              </div>
             </div>
-            <span class="reel-label">指を離さず左右に動かしてバランスを取り、回して巻く！</span>
+
+            <div id="fight-touch-right" class="fight-touch-zone right" aria-label="右テンションエリア"></div>
           </div>
         </div>
       </div>

@@ -50,6 +50,9 @@ let lastReelAngle = null;
 let accumulatedReelRotation = 0;
 let isFightTouchActive = false;
 let fightTouchSide = null;
+let isZoneTouchOnly = false;
+let isTouchingActiveZone = false;
+let hasActivatedZone = false;
 
 // --- 音声効果 (簡易シンセサイザー) ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -141,6 +144,8 @@ const elDepthFill = document.getElementById('depth-fill');
 const elFishInfoFight = document.getElementById('fish-info-fight');
 const elTensionGaugeArea = document.getElementById('tension-gauge-area');
 const elTensionPointer = document.getElementById('tension-pointer');
+const elFightTouchLeft = document.getElementById('fight-touch-left');
+const elFightTouchRight = document.getElementById('fight-touch-right');
 
 // 結果画面のアセット表示切り替え用
 const elCanvasResult = document.getElementById('canvas-result-fish');
@@ -283,20 +288,29 @@ function calculateWeight(length) {
 // --- 指一本でスワイプ（左右移動）＆リール回転を同時に受けるイベント処理 ---
 const reelDisc = document.getElementById('reel-disc');
 
-function handleStart(clientX, clientY) {
+function handleStart(clientX, clientY, startOnZone = false) {
   isPressing = true;
   pressStartX = clientX;
   pressStartPlayerPos = playerPos;
+  isZoneTouchOnly = startOnZone;
+  isFightTouchActive = true;
+  fightTouchSide = clientX < window.innerWidth / 2 ? 'left' : 'right';
+  updateZoneTouchState(clientX, clientY);
 
-  const rect = reelDisc.getBoundingClientRect();
-  const centerX = rect.left + rect.width / 2;
-  const centerY = rect.top + rect.height / 2;
-  lastReelAngle = Math.atan2(clientY - centerY, clientX - centerX);
-  accumulatedReelRotation = 0;
+  if (!startOnZone) {
+    const rect = reelDisc.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    lastReelAngle = Math.atan2(clientY - centerY, clientX - centerX);
+    accumulatedReelRotation = 0;
+  }
 }
 
 function handleMove(clientX, clientY) {
   if (!isPressing) return;
+  updateZoneTouchState(clientX, clientY);
+
+  if (isZoneTouchOnly) return;
 
   // 左右の移動（バランス調整）: 指の水平スライド量を反映
   const deltaX = clientX - pressStartX;
@@ -331,7 +345,7 @@ function handleMove(clientX, clientY) {
 reelDisc.addEventListener('touchstart', (e) => {
   e.preventDefault();
   const touch = e.touches[0];
-  handleStart(touch.clientX, touch.clientY);
+  handleStart(touch.clientX, touch.clientY, false);
 }, { passive: false });
 
 reelDisc.addEventListener('touchmove', (e) => {
@@ -342,8 +356,28 @@ reelDisc.addEventListener('touchmove', (e) => {
 
 reelDisc.addEventListener('mousedown', (e) => {
   e.preventDefault();
-  handleStart(e.clientX, e.clientY);
+  handleStart(e.clientX, e.clientY, false);
 });
+
+if (elFightTouchLeft && elFightTouchRight) {
+  const bindZoneStart = (zoneEl, side) => {
+    zoneEl.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      handleStart(touch.clientX, touch.clientY, true);
+      fightTouchSide = side;
+    }, { passive: false });
+
+    zoneEl.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      handleStart(e.clientX, e.clientY, true);
+      fightTouchSide = side;
+    });
+  };
+
+  bindZoneStart(elFightTouchLeft, 'left');
+  bindZoneStart(elFightTouchRight, 'right');
+}
 
 window.addEventListener('mousemove', (e) => {
   if (isPressing) {
@@ -356,6 +390,9 @@ function handleRelease() {
   lastReelAngle = null;
   isFightTouchActive = false;
   fightTouchSide = null;
+  isZoneTouchOnly = false;
+  isTouchingActiveZone = false;
+  hasActivatedZone = false;
 }
 
 window.addEventListener('mouseup', handleRelease);
@@ -599,7 +636,7 @@ function getOppositeRedTarget() {
 }
 
 function applyTouchReturnToWhite(dt) {
-  if (!isMediumOrLarger() || !isFightTouchActive) return;
+  if (!isMediumOrLarger() || !isTouchingActiveZone) return;
   const drift = 20 * dt;
   if (tension < 50) {
     tension = Math.min(50, tension + drift);
@@ -645,24 +682,67 @@ function isTensionInRedZone() {
   return tension <= 25 || tension >= 75;
 }
 
-function isTouchingCorrespondingRedArea() {
-  if (!isFightTouchActive || !fightTouchSide) return false;
+function getActiveTouchZoneFromTension() {
   if (tension <= 25) {
-    return fightTouchSide === 'left';
+    return { side: 'left', color: 'red' };
+  }
+  if (tension > 25 && tension < 35) {
+    return { side: 'left', color: 'blue' };
+  }
+  if (tension > 65 && tension < 75) {
+    return { side: 'right', color: 'blue' };
   }
   if (tension >= 75) {
-    return fightTouchSide === 'right';
+    return { side: 'right', color: 'red' };
   }
-  return true;
+  return null;
 }
 
 function getRedTensionSide() {
-  if (!isTensionInRedZone()) return null;
-  return tension <= 25 ? 'left' : 'right';
+  if (tension <= 25) {
+    return 'left';
+  }
+  if (tension >= 75) {
+    return 'right';
+  }
+  return null;
+}
+
+function isPointerInsideElement(clientX, clientY, element) {
+  const rect = element.getBoundingClientRect();
+  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+}
+
+function updateZoneTouchState(clientX, clientY) {
+  isTouchingActiveZone = false;
+  const activeZone = getActiveTouchZoneFromTension();
+  if (!activeZone) {
+    return;
+  }
+
+  const targetEl = activeZone.side === 'left' ? elFightTouchLeft : elFightTouchRight;
+  if (!targetEl) return;
+
+  if (isPointerInsideElement(clientX, clientY, targetEl)) {
+    isTouchingActiveZone = true;
+    if (!hasActivatedZone) {
+      const delta = tension < 50 ? 10 : -10;
+      tension = Math.max(0, Math.min(100, tension + delta));
+      tensionVelocity = 0;
+      updateTensionUI();
+      playSound(520, 0.08, 'triangle');
+      vibrate(20);
+      hasActivatedZone = true;
+    }
+  }
 }
 
 function shouldReturnLine() {
   if (!isMediumOrLarger() || currentState !== STATE.FIGHT) return false;
+
+  if (isTouchingActiveZone) {
+    return false;
+  }
 
   if (!isFightTouchActive) {
     return true;
@@ -853,6 +933,21 @@ function updateTensionUI() {
   if (pointer) {
     pointer.style.left = `${tension}%`;
   }
+  updateTouchZoneGlow();
+}
+
+function updateTouchZoneGlow() {
+  if (!elFightTouchLeft || !elFightTouchRight) return;
+  elFightTouchLeft.className = 'fight-touch-zone left';
+  elFightTouchRight.className = 'fight-touch-zone right';
+
+  const activeZone = getActiveTouchZoneFromTension();
+  if (!activeZone) {
+    return;
+  }
+
+  const element = activeZone.side === 'left' ? elFightTouchLeft : elFightTouchRight;
+  element.classList.add('active', `glow-${activeZone.color}`);
 }
 
 // --- リアルなブラックバスのCanvas描画 (ファイト中) ---
