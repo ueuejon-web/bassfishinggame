@@ -766,6 +766,13 @@ function canFishPullLineBack() {
   );
 }
 
+const LINE_BACK_SPEED_RELEASE = 2.1;
+const LINE_BACK_SPEED_RED_WHILE_PRESSING = LINE_BACK_SPEED_RELEASE * 0.3;
+
+function isTensionInRedZone() {
+  return tension <= 25 || tension >= 75;
+}
+
 function escapeFromFight() {
   document.getElementById('result-title').innerText = '逃げられた...';
   document.getElementById('res-name').innerText = FISH_DATA[selectedFishType]?.name || '-';
@@ -1075,15 +1082,25 @@ function fightLoop(timestamp) {
   tension += tensionVelocity * dt;
   tension = Math.max(0, Math.min(100, tension));
 
-  if (!isPressing && canFishPullLineBack()) {
-    distance += dt * 2.1;
-    if (distance >= 15.0) {
-      distance = 15.0;
-      updateDistanceMeter();
-      escapeFromFight();
-      return;
+  if (canFishPullLineBack()) {
+    let lineBackSpeed = 0;
+
+    if (!isPressing) {
+      lineBackSpeed = LINE_BACK_SPEED_RELEASE;
+    } else if (isTensionInRedZone()) {
+      lineBackSpeed = LINE_BACK_SPEED_RED_WHILE_PRESSING;
     }
-    updateDistanceMeter();
+
+    if (lineBackSpeed > 0) {
+      distance += dt * lineBackSpeed;
+      if (distance >= 15.0) {
+        distance = 15.0;
+        updateDistanceMeter();
+        escapeFromFight();
+        return;
+      }
+      updateDistanceMeter();
+    }
   }
 
   updateTensionUI();
