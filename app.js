@@ -6,6 +6,8 @@
 // --- ゲーム状態定義 ---
 const STATE = {
   TITLE: 'TITLE',
+  MODE_SELECT: 'MODE_SELECT',
+  TIME_RULES: 'TIME_RULES',
   CAST_WAIT: 'CAST_WAIT',
   CASTING: 'CASTING',
   RETRIEVING: 'RETRIEVING', // 回収フェーズ
@@ -14,6 +16,23 @@ const STATE = {
 };
 
 let currentState = STATE.TITLE;
+
+const GAME_MODE = {
+  FREE_FISHING: 'FREE_FISHING',
+  TIME_ATTACK: 'TIME_ATTACK'
+};
+
+let currentGameMode = GAME_MODE.FREE_FISHING;
+let timeAttackActive = false;
+let timeAttackStartTime = 0;
+let timeAttackTimerHandle = null;
+let timeAttackFinishQueued = false;
+let timeAttackCountdownTimer = null;
+let timeAttackCatchCount = 0;
+let timeAttackMaxLength = 0;
+let timeAttackMaxLengthFishType = null; // 最大サイズの魚の種類
+let timeAttackTotalPoints = 0;
+let timeAttackLastShownSecond = -1;
 
 // --- 抽選パラメータ ---
 const FISH_DATA = {
@@ -48,11 +67,6 @@ let pressStartX = 0;
 let pressStartPlayerPos = 50.0;
 let lastReelAngle = null;
 let accumulatedReelRotation = 0;
-let isFightTouchActive = false;
-let fightTouchSide = null;
-let isZoneTouchOnly = false;
-let isTouchingActiveZone = false;
-let hasActivatedZone = false;
 
 // --- 音声効果 (簡易シンセサイザー) ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -133,19 +147,38 @@ function shakeScreen() {
 // --- UI要素の取得 ---
 const screens = {
   TITLE: document.getElementById('screen-title'),
+  MODE_SELECT: document.getElementById('screen-mode-select'),
+  TIME_RULES: document.getElementById('screen-time-rules'),
   CAST: document.getElementById('screen-cast'),
   FIGHT: document.getElementById('screen-fight'),
   RESULT: document.getElementById('screen-result')
 };
 
 // HUDとコントロールエリアの要素
+const elModeSelect = document.getElementById('screen-mode-select');
+const elTimeRules = document.getElementById('screen-time-rules');
 const elDistance = document.getElementById('txt-distance');
 const elDepthFill = document.getElementById('depth-fill');
 const elFishInfoFight = document.getElementById('fish-info-fight');
 const elTensionGaugeArea = document.getElementById('tension-gauge-area');
-const elTensionPointer = document.getElementById('tension-pointer');
 const elFightTouchLeft = document.getElementById('fight-touch-left');
 const elFightTouchRight = document.getElementById('fight-touch-right');
+const elTimeAttackHud = document.getElementById('time-attack-hud');
+const elTxtMaxLength = document.getElementById('txt-max-length');
+const elTxtTimeRemaining = document.getElementById('txt-time-remaining');
+const elTxtCatchCount = document.getElementById('txt-catch-count');
+const elCountdownOverlay = document.getElementById('countdown-overlay');
+const elCountdownText = document.getElementById('countdown-text');
+const elTimeAttackSummary = document.getElementById('time-attack-summary');
+const elTaMaxLength = document.getElementById('ta-max-length');
+const elTaCatchCount = document.getElementById('ta-catch-count');
+const elTaTotalPoints = document.getElementById('ta-total-points');
+const elResultDetails = document.getElementById('result-details');
+const btnModeFree = document.getElementById('btn-mode-free');
+const btnModeTime = document.getElementById('btn-mode-time');
+const btnModeBack = document.getElementById('btn-mode-back');
+const btnTimeStart = document.getElementById('btn-time-start');
+const btnTimeBack = document.getElementById('btn-time-back');
 
 // 結果画面のアセット表示切り替え用
 const elCanvasResult = document.getElementById('canvas-result-fish');
@@ -166,6 +199,16 @@ function initRulerTicks() {
 
 // --- 画面切り替え ---
 function changeState(newState) {
+  // FIGHT状態から出ていく場合、glow を全削除
+  if (currentState === STATE.FIGHT && newState !== STATE.FIGHT) {
+    if (elFightTouchLeft) {
+      elFightTouchLeft.classList.remove('glow-red', 'glow-blue', 'glow-white', 'active');
+    }
+    if (elFightTouchRight) {
+      elFightTouchRight.classList.remove('glow-red', 'glow-blue', 'glow-white', 'active');
+    }
+  }
+  
   currentState = newState;
   Object.keys(screens).forEach(key => {
     screens[key].classList.remove('active');
@@ -173,6 +216,10 @@ function changeState(newState) {
 
   if (newState === STATE.TITLE) {
     screens.TITLE.classList.add('active');
+  } else if (newState === STATE.MODE_SELECT) {
+    screens.MODE_SELECT.classList.add('active');
+  } else if (newState === STATE.TIME_RULES) {
+    screens.TIME_RULES.classList.add('active');
   } else if (newState === STATE.CAST_WAIT || newState === STATE.CASTING) {
     screens.CAST.classList.add('active');
   } else if (newState === STATE.RETRIEVING) {
@@ -190,6 +237,311 @@ function changeState(newState) {
   }
 }
 
+function hideTimeAttackHud() {
+  if (elTimeAttackHud) {
+    elTimeAttackHud.classList.add('hidden');
+  }
+}
+
+function showTimeAttackHud() {
+  if (elTimeAttackHud) {
+    elTimeAttackHud.classList.remove('hidden');
+  }
+}
+
+function hideCountdownOverlay() {
+  if (elCountdownOverlay) {
+    elCountdownOverlay.classList.remove('pass-through');
+    elCountdownOverlay.classList.add('hidden');
+  }
+}
+
+function showCountdownOverlay(text, options = {}) {
+  if (!elCountdownOverlay || !elCountdownText) return;
+  const { passThrough = false } = options;
+  elCountdownText.innerText = text;
+  elCountdownOverlay.classList.toggle('pass-through', passThrough);
+  elCountdownOverlay.classList.remove('hidden');
+}
+
+function clearTimeAttackCountdownTimer() {
+  if (timeAttackCountdownTimer) {
+    clearTimeout(timeAttackCountdownTimer);
+    timeAttackCountdownTimer = null;
+  }
+}
+
+function resetTimeAttackStats() {
+  timeAttackActive = false;
+  timeAttackStartTime = 0;
+  timeAttackFinishQueued = false;
+  timeAttackCatchCount = 0;
+  timeAttackMaxLength = 0;
+  timeAttackMaxLengthFishType = null;
+  timeAttackTotalPoints = 0;
+  timeAttackLastShownSecond = -1;
+  clearInterval(timeAttackTimerHandle);
+  timeAttackTimerHandle = null;
+  clearTimeAttackCountdownTimer();
+  hideCountdownOverlay();
+  hideTimeAttackHud();
+  if (elTimeAttackSummary) {
+    elTimeAttackSummary.classList.add('hidden');
+  }
+  if (elResultDetails) {
+    elResultDetails.classList.remove('hidden');
+  }
+}
+
+function formatTime(seconds) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+function formatLengthValue(length) {
+  return length > 0 ? `${length} cm` : '-';
+}
+
+function updateTimeAttackHud() {
+  if (!timeAttackActive || !elTxtTimeRemaining) return;
+
+  const elapsed = (Date.now() - timeAttackStartTime) / 1000;
+  const remaining = Math.max(0, 180 - elapsed);
+  elTxtTimeRemaining.innerText = formatTime(remaining);
+
+  if (remaining <= 60) {
+    if (elTxtMaxLength) elTxtMaxLength.innerText = '?';
+    if (elTxtCatchCount) elTxtCatchCount.innerText = '?';
+  } else {
+    if (elTxtMaxLength) elTxtMaxLength.innerText = formatLengthValue(timeAttackMaxLength);
+    if (elTxtCatchCount) elTxtCatchCount.innerText = `${timeAttackCatchCount}`;
+  }
+}
+
+function getTimeAttackPoints(fish) {
+  if (fish.isTrash) return -3;
+  if (fishLength >= 60) return 10;
+
+  switch (selectedFishType) {
+    case 'SMALL':
+      return 1;
+    case 'MEDIUM':
+      return 2;
+    case 'LARGE':
+      return 3;
+    case 'HUGE':
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+function recordTimeAttackCatch(fish) {
+  timeAttackCatchCount += 1;
+  if (!fish.isTrash && fishLength > timeAttackMaxLength) {
+    timeAttackMaxLength = fishLength;
+    timeAttackMaxLengthFishType = selectedFishType;
+  }
+  timeAttackTotalPoints += getTimeAttackPoints(fish);
+  updateTimeAttackHud();
+}
+
+function startTimeAttackSession() {
+  currentGameMode = GAME_MODE.TIME_ATTACK;
+  resetTimeAttackStats();
+  timeAttackActive = true;
+  timeAttackStartTime = Date.now();
+  showTimeAttackHud();
+  updateTimeAttackHud();
+
+  clearInterval(timeAttackTimerHandle);
+  timeAttackTimerHandle = setInterval(() => {
+    if (!timeAttackActive) return;
+
+    const elapsed = (Date.now() - timeAttackStartTime) / 1000;
+    const remaining = Math.max(0, 180 - elapsed);
+    const wholeSeconds = Math.ceil(remaining);
+
+    if (remaining <= 60) {
+      if (elTxtMaxLength) elTxtMaxLength.innerText = '?';
+      if (elTxtCatchCount) elTxtCatchCount.innerText = '?';
+    } else {
+      if (elTxtMaxLength) elTxtMaxLength.innerText = formatLengthValue(timeAttackMaxLength);
+      if (elTxtCatchCount) elTxtCatchCount.innerText = `${timeAttackCatchCount}`;
+    }
+
+    if (elTxtTimeRemaining) {
+      elTxtTimeRemaining.innerText = formatTime(remaining);
+    }
+
+    if (wholeSeconds <= 3 && wholeSeconds >= 1 && wholeSeconds !== timeAttackLastShownSecond) {
+      timeAttackLastShownSecond = wholeSeconds;
+      showCountdownOverlay(`${wholeSeconds}`, { passThrough: true });
+    }
+
+    if (remaining <= 0 && !timeAttackFinishQueued) {
+      timeAttackFinishQueued = true;
+      clearInterval(timeAttackTimerHandle);
+      timeAttackTimerHandle = null;
+      showCountdownOverlay('FINISH');
+      playWhistleSound();
+      setTimeout(() => {
+        hideCountdownOverlay();
+        finishTimeAttackMatch();
+      }, 900);
+    }
+  }, 200);
+}
+
+function playWhistleSound() {
+  playSound(1200, 0.08, 'square');
+  setTimeout(() => playSound(860, 0.12, 'square'), 60);
+}
+
+function startTimeAttackCountdown() {
+  clearTimeAttackCountdownTimer();
+  const steps = ['3', '2', '1'];
+  let stepIndex = 0;
+
+  showCountdownOverlay(steps[stepIndex]);
+  playSound(740, 0.08, 'triangle');
+
+  const advance = () => {
+    stepIndex += 1;
+    if (stepIndex < steps.length) {
+      showCountdownOverlay(steps[stepIndex]);
+      playSound(740, 0.08, 'triangle');
+      timeAttackCountdownTimer = setTimeout(advance, 1000);
+      return;
+    }
+
+    showCountdownOverlay('START');
+    playWhistleSound();
+    timeAttackCountdownTimer = setTimeout(() => {
+      hideCountdownOverlay();
+      startTimeAttackSession();
+      changeState(STATE.CAST_WAIT);
+    }, 900);
+  };
+
+  timeAttackCountdownTimer = setTimeout(advance, 1000);
+}
+
+function finishTimeAttackMatch() {
+  timeAttackActive = false;
+  clearInterval(timeAttackTimerHandle);
+  timeAttackTimerHandle = null;
+  hideTimeAttackHud();
+  hideCountdownOverlay();
+
+  document.getElementById('result-title').innerText = 'FINISH';
+  document.getElementById('res-name').innerText = 'TIME ATTACK';
+  document.getElementById('res-length').innerText = '-';
+  document.getElementById('res-weight').innerText = '-';
+  document.getElementById('btn-restart').innerText = 'BACK TO TITLE';
+
+  if (elResultDetails) {
+    elResultDetails.classList.add('hidden');
+  }
+  if (elTimeAttackSummary) {
+    elTimeAttackSummary.classList.remove('hidden');
+  }
+
+  if (elTaMaxLength) elTaMaxLength.innerText = formatLengthValue(timeAttackMaxLength);
+  if (elTaCatchCount) elTaCatchCount.innerText = `${timeAttackCatchCount}`;
+  if (elTaTotalPoints) elTaTotalPoints.innerText = `${timeAttackTotalPoints} PT`;
+
+  // 最大サイズの魚を表示
+  if (timeAttackMaxLengthFishType && timeAttackMaxLength > 0) {
+    const fish = FISH_DATA[timeAttackMaxLengthFishType];
+    
+    if (fish.isTrash) {
+      elImgResult.classList.add('hidden');
+      elImgResult.style.display = 'none';
+      elCanvasResult.style.display = 'block';
+      const ctx = elCanvasResult.getContext('2d');
+      ctx.clearRect(0, 0, elCanvasResult.width, elCanvasResult.height);
+      drawTrash(ctx, elCanvasResult.width / 2, elCanvasResult.height / 2 + 10);
+    } else {
+      // 最大サイズの魚を画像で表示
+      if (timeAttackMaxLength <= 40) {
+        elImgResult.src = 'fish_small.png';
+      } else {
+        elImgResult.src = 'fish_large.png';
+      }
+      
+      const widthPercentage = (timeAttackMaxLength / 60) * 100;
+      elImgResult.style.width = `calc(${widthPercentage}% - 16px)`;
+      
+      elCanvasResult.style.display = 'none';
+      elImgResult.classList.remove('hidden');
+      elImgResult.style.display = 'block';
+    }
+  } else {
+    // 魚が釣れなかった場合
+    elImgResult.classList.add('hidden');
+    elImgResult.style.display = 'none';
+    elCanvasResult.style.display = 'block';
+    const ctx = elCanvasResult.getContext('2d');
+    ctx.clearRect(0, 0, elCanvasResult.width, elCanvasResult.height);
+  }
+
+  changeState(STATE.RESULT);
+}
+
+function resetToTitle() {
+  resetTimeAttackStats();
+  currentGameMode = GAME_MODE.FREE_FISHING;
+  document.getElementById('btn-restart').innerText = 'NEXT CAST';
+  changeState(STATE.TITLE);
+}
+
+let isExtraLargePracticeMode = false;
+const titleLogo = document.getElementById('title-logo');
+const titleScreen = document.getElementById('screen-title');
+const titleLogoDefaultSrc = titleLogo ? titleLogo.src : '';
+const extraModeLogoSrc = 'IMG_9181.png';
+let lastTitleTouchTime = 0;
+
+if (titleScreen && titleLogo) {
+  titleScreen.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    if (!isExtraLargePracticeMode) {
+      isExtraLargePracticeMode = true;
+      titleLogo.src = extraModeLogoSrc;
+      playSound(520, 0.12, 'triangle');
+      setTimeout(() => playSound(720, 0.14, 'triangle'), 120);
+    } else {
+      isExtraLargePracticeMode = false;
+      titleLogo.src = titleLogoDefaultSrc;
+      playSound(720, 0.12, 'triangle');
+      setTimeout(() => playSound(520, 0.14, 'triangle'), 120);
+    }
+  });
+
+  titleScreen.addEventListener('touchend', () => {
+    const now = Date.now();
+    if (now - lastTitleTouchTime < 320) {
+      if (!isExtraLargePracticeMode) {
+        isExtraLargePracticeMode = true;
+        titleLogo.src = extraModeLogoSrc;
+        playSound(520, 0.12, 'triangle');
+        setTimeout(() => playSound(720, 0.14, 'triangle'), 120);
+      } else {
+        isExtraLargePracticeMode = false;
+        titleLogo.src = titleLogoDefaultSrc;
+        playSound(720, 0.12, 'triangle');
+        setTimeout(() => playSound(520, 0.14, 'triangle'), 120);
+      }
+      lastTitleTouchTime = 0;
+    } else {
+      lastTitleTouchTime = now;
+    }
+  });
+}
+
 // --- 初期化 ---
 document.getElementById('btn-start').addEventListener('click', () => {
   if (audioCtx.state === 'suspended') {
@@ -198,8 +550,45 @@ document.getElementById('btn-start').addEventListener('click', () => {
   playSound(440, 0.1);
   vibrate(50);
   initRulerTicks(); // メジャー目盛りの設置
-  changeState(STATE.CAST_WAIT);
+  changeState(STATE.MODE_SELECT);
 });
+
+if (btnModeFree) {
+  btnModeFree.addEventListener('click', () => {
+    currentGameMode = GAME_MODE.FREE_FISHING;
+    resetTimeAttackStats();
+    changeState(STATE.CAST_WAIT);
+  });
+}
+
+if (btnModeTime) {
+  btnModeTime.addEventListener('click', () => {
+    currentGameMode = GAME_MODE.TIME_ATTACK;
+    resetTimeAttackStats();
+    changeState(STATE.TIME_RULES);
+  });
+}
+
+if (btnModeBack) {
+  btnModeBack.addEventListener('click', () => {
+    resetTimeAttackStats();
+    changeState(STATE.TITLE);
+  });
+}
+
+if (btnTimeBack) {
+  btnTimeBack.addEventListener('click', () => {
+    resetTimeAttackStats();
+    changeState(STATE.MODE_SELECT);
+  });
+}
+
+if (btnTimeStart) {
+  btnTimeStart.addEventListener('click', () => {
+    currentGameMode = GAME_MODE.TIME_ATTACK;
+    startTimeAttackCountdown();
+  });
+}
 
 // --- キャスト操作 ---
 const waterSurface = document.getElementById('water-surface');
@@ -235,23 +624,31 @@ function setupLureRetconciliation(castDistance) {
   jumpTimer = 0;
   jumpTensionHoldTime = 0;
 
-  if (rand < 40) {
-    // スルー 40%
+  if (isExtraLargePracticeMode) {
+    willHit = true;
+    selectedFishType = 'HUGE';
+    hitDistance = 1.5 + Math.random() * 12.5;
+
+    if (Math.random() < 0.1) {
+      hitDistance = 14.8;
+    }
+  } else if (rand < 50) {
+    // スルー 50%
     willHit = false;
     selectedFishType = null;
     hitDistance = -1;
   } else {
     willHit = true;
-    if (rand < 60) {
+    if (rand < 70) {
       selectedFishType = 'SMALL'; // 小バス 20%
-    } else if (rand < 80) {
+    } else if (rand < 90) {
       selectedFishType = 'MEDIUM'; // 中バス 20%
-    } else if (rand < 88) {
-      selectedFishType = 'LARGE'; // 大バス 8%
     } else if (rand < 93) {
-      selectedFishType = 'HUGE'; // 特大バス 5%
+      selectedFishType = 'LARGE'; // 大バス 3%
+    } else if (rand < 95) {
+      selectedFishType = 'HUGE'; // 特大バス 2%
     } else {
-      selectedFishType = 'CAN'; // 空き缶 7%
+      selectedFishType = 'CAN'; // 空き缶 5%
     }
 
     // HITする距離を決定（1.5m 〜 14.0m の間）
@@ -288,29 +685,20 @@ function calculateWeight(length) {
 // --- 指一本でスワイプ（左右移動）＆リール回転を同時に受けるイベント処理 ---
 const reelDisc = document.getElementById('reel-disc');
 
-function handleStart(clientX, clientY, startOnZone = false) {
+function handleStart(clientX, clientY) {
   isPressing = true;
   pressStartX = clientX;
   pressStartPlayerPos = playerPos;
-  isZoneTouchOnly = startOnZone;
-  isFightTouchActive = true;
-  fightTouchSide = clientX < window.innerWidth / 2 ? 'left' : 'right';
-  updateZoneTouchState(clientX, clientY);
 
-  if (!startOnZone) {
-    const rect = reelDisc.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    lastReelAngle = Math.atan2(clientY - centerY, clientX - centerX);
-    accumulatedReelRotation = 0;
-  }
+  const rect = reelDisc.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  lastReelAngle = Math.atan2(clientY - centerY, clientX - centerX);
+  accumulatedReelRotation = 0;
 }
 
 function handleMove(clientX, clientY) {
   if (!isPressing) return;
-  updateZoneTouchState(clientX, clientY);
-
-  if (isZoneTouchOnly) return;
 
   // 左右の移動（バランス調整）: 指の水平スライド量を反映
   const deltaX = clientX - pressStartX;
@@ -345,7 +733,7 @@ function handleMove(clientX, clientY) {
 reelDisc.addEventListener('touchstart', (e) => {
   e.preventDefault();
   const touch = e.touches[0];
-  handleStart(touch.clientX, touch.clientY, false);
+  handleStart(touch.clientX, touch.clientY);
 }, { passive: false });
 
 reelDisc.addEventListener('touchmove', (e) => {
@@ -356,28 +744,8 @@ reelDisc.addEventListener('touchmove', (e) => {
 
 reelDisc.addEventListener('mousedown', (e) => {
   e.preventDefault();
-  handleStart(e.clientX, e.clientY, false);
+  handleStart(e.clientX, e.clientY);
 });
-
-if (elFightTouchLeft && elFightTouchRight) {
-  const bindZoneStart = (zoneEl, side) => {
-    zoneEl.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      handleStart(touch.clientX, touch.clientY, true);
-      fightTouchSide = side;
-    }, { passive: false });
-
-    zoneEl.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      handleStart(e.clientX, e.clientY, true);
-      fightTouchSide = side;
-    });
-  };
-
-  bindZoneStart(elFightTouchLeft, 'left');
-  bindZoneStart(elFightTouchRight, 'right');
-}
 
 window.addEventListener('mousemove', (e) => {
   if (isPressing) {
@@ -388,34 +756,80 @@ window.addEventListener('mousemove', (e) => {
 function handleRelease() {
   isPressing = false;
   lastReelAngle = null;
-  isFightTouchActive = false;
-  fightTouchSide = null;
-  isZoneTouchOnly = false;
-  isTouchingActiveZone = false;
-  hasActivatedZone = false;
+}
+
+function canFishPullLineBack() {
+  return currentState === STATE.FIGHT && (
+    selectedFishType === 'MEDIUM' ||
+    selectedFishType === 'LARGE' ||
+    selectedFishType === 'HUGE'
+  );
+}
+
+function escapeFromFight() {
+  document.getElementById('result-title').innerText = '逃げられた...';
+  document.getElementById('res-name').innerText = FISH_DATA[selectedFishType]?.name || '-';
+  document.getElementById('res-length').innerText = '-';
+  document.getElementById('res-weight').innerText = '-';
+
+  elImgResult.style.display = 'none';
+  elCanvasResult.style.display = 'block';
+  const ctx = elCanvasResult.getContext('2d');
+  ctx.clearRect(0, 0, elCanvasResult.width, elCanvasResult.height);
+
+  changeState(STATE.RESULT);
 }
 
 window.addEventListener('mouseup', handleRelease);
 window.addEventListener('touchend', handleRelease);
 
-if (elTensionPointer) {
-  const startTensionTouch = (clientX, clientY) => {
-    if (currentState !== STATE.FIGHT) return;
-    isFightTouchActive = true;
-    fightTouchSide = clientX < window.innerWidth / 2 ? 'left' : 'right';
-  };
-
-  elTensionPointer.addEventListener('mousedown', (e) => {
+// fight-touch-zoneのハンドラ
+if (elFightTouchLeft) {
+  elFightTouchLeft.addEventListener('touchstart', (e) => {
     e.preventDefault();
-    startTensionTouch(e.clientX, e.clientY);
-  });
-
-  elTensionPointer.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 0) return;
-    const touch = e.touches[0];
-    isFightTouchActive = true;
-    fightTouchSide = touch.clientX < window.innerWidth / 2 ? 'left' : 'right';
+    if (currentState === STATE.FIGHT) {
+      tension = Math.min(100, tension + 15);
+      tensionVelocity = 1;
+      updateTensionUI();
+      vibrate(20);
+      playSound(320, 0.05, 'sine');
+    }
   }, { passive: false });
+
+  elFightTouchLeft.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (currentState === STATE.FIGHT) {
+      tension = Math.min(100, tension + 15);
+      tensionVelocity = 1;
+      updateTensionUI();
+      vibrate(20);
+      playSound(320, 0.05, 'sine');
+    }
+  });
+}
+
+if (elFightTouchRight) {
+  elFightTouchRight.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (currentState === STATE.FIGHT) {
+      tension = Math.max(0, tension - 15);
+      tensionVelocity = -1;
+      updateTensionUI();
+      vibrate(20);
+      playSound(180, 0.05, 'sine');
+    }
+  }, { passive: false });
+
+  elFightTouchRight.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (currentState === STATE.FIGHT) {
+      tension = Math.max(0, tension - 15);
+      tensionVelocity = -1;
+      updateTensionUI();
+      vibrate(20);
+      playSound(180, 0.05, 'sine');
+    }
+  });
 }
 
 function processReelTurn() {
@@ -445,7 +859,11 @@ function triggerHit() {
     fishWeight = 0;
     elFishInfoFight.innerText = 'ゴミ？';
   } else {
-    fishLength = Math.round(config.minL + Math.random() * (config.maxL - config.minL));
+    if (isExtraLargePracticeMode && selectedFishType === 'HUGE') {
+      fishLength = 60;
+    } else {
+      fishLength = Math.round(config.minL + Math.random() * (config.maxL - config.minL));
+    }
     fishWeight = calculateWeight(fishLength);
     elFishInfoFight.innerText = `${config.name} (${fishLength}cm)`;
   }
@@ -474,30 +892,27 @@ function triggerHit() {
 }
 
 function showLandingMiss() {
+  // HIT失敗時は常に CAST_WAIT に戻す（リザルト画面を表示しない）
   changeState(STATE.CAST_WAIT);
 }
 
 function reelIn() {
   if (tension > 25 && tension < 75) {
-    if (isTensionInWhiteZone() || !isMediumOrLarger()) {
-      if (distance > 1.0) {
-        distance -= 0.25;
-        if (distance < 1.0) distance = 1.0;
-        updateDistanceMeter();
+    if (distance > 1.0) {
+      distance -= 0.25;
+      if (distance < 1.0) distance = 1.0;
+
+      if (tension > 25 && tension < 35) {
+        tension = Math.max(0, tension - 2.5);
+      } else if (tension > 65 && tension < 75) {
+        tension = Math.min(100, tension + 2.5);
       }
+
+      updateDistanceMeter();
+      updateTensionUI();
+      
       vibrate(15);
       playSound(300, 0.05, 'triangle');
-      if (distance <= 1.0) {
-        landingSuccess();
-      }
-    } else if (isTensionInBlueZone()) {
-      if (tension < 50) {
-        tension = Math.max(0, tension - 12);
-      } else {
-        tension = Math.min(100, tension + 12);
-      }
-      updateTensionUI();
-      playSound(220, 0.05, 'triangle');
     }
   } else {
     playSound(180, 0.1, 'sawtooth');
@@ -531,22 +946,19 @@ const AREA_BOUNDARIES = {
 const FIGHT_RULES = {
   SMALL: {
     name: 'SMALL',
-    allowedAreas: [AREA.BLUE, AREA.CENTER],  // 青のエリアまでしかいかない
     difficulty: 'EASY'
   },
   MEDIUM: {
     name: 'MEDIUM',
-    allowedAreas: [AREA.BLUE, AREA.CENTER, AREA.RED],  // 赤にも行くが
     difficulty: 'NORMAL'
   },
   LARGE: {
     name: 'LARGE',
-    allowedAreas: [AREA.BLUE, AREA.CENTER, AREA.RED],
     difficulty: 'HARD'
   },
   HUGE: {
     name: 'EXTRA LARGE',
-    allowedAreas: [AREA.BLUE, AREA.CENTER, AREA.RED],
+    switchAreas: true,  // 赤エリアに入った際に反対の赤エリアに行く
     difficulty: 'EXTREME'
   }
 };
@@ -557,9 +969,6 @@ let previousArea = AREA.CENTER;
 let areaStayTime = 0;
 let lastAreaChangeTime = 0;
 let areaChangeCount = 0;
-let tensionArea = AREA.CENTER;
-let previousTensionArea = AREA.CENTER;
-let redZoneActionTimer = 0;
 
 function getAreaFromPosition(pos) {
   if (pos < AREA_BOUNDARIES.BLUE_END) {
@@ -585,227 +994,12 @@ function updateAreaTracking(dt) {
   }
 }
 
-function updateAreaTimerUI() {
-  return;
-}
 
-function isMediumOrLarger() {
-  return selectedFishType === 'MEDIUM' || selectedFishType === 'LARGE' || selectedFishType === 'HUGE';
-}
-
-function getTensionAreaFromValue(value) {
-  if (value <= 25 || value >= 75) {
-    return AREA.RED;
-  }
-  if ((value > 25 && value < 35) || (value > 65 && value < 75)) {
-    return AREA.BLUE;
-  }
-  return AREA.CENTER;
-}
-
-function updateTensionAreaTracking() {
-  const newArea = getTensionAreaFromValue(tension);
-  if (newArea !== tensionArea) {
-    previousTensionArea = tensionArea;
-    tensionArea = newArea;
-  }
-}
-
-function isTensionInWhiteZone() {
-  return tension >= 35 && tension <= 65;
-}
-
-function isTensionInBlueZone() {
-  return (tension > 25 && tension < 35) || (tension > 65 && tension < 75);
-}
-
-function isLeftBlueZone() {
-  return tension > 25 && tension < 35;
-}
-
-function isRightBlueZone() {
-  return tension > 65 && tension < 75;
-}
-
-function getOppositeBlueTarget() {
-  return tension <= 50 ? 70 : 30;
-}
-
-function getOppositeRedTarget() {
-  return tension <= 50 ? 90 : 10;
-}
-
-function applyTouchReturnToWhite(dt) {
-  if (!isMediumOrLarger() || !isTouchingActiveZone) return;
-  const drift = 20 * dt;
-  if (tension < 50) {
-    tension = Math.min(50, tension + drift);
-  } else {
-    tension = Math.max(50, tension - drift);
-  }
-}
-
-function handleTensionRedEntry() {
-  if (!isMediumOrLarger()) return;
-  if (distance <= 1.0) return;
-  if (redZoneActionTimer > 0) return;
-
-  const rand = Math.random() * 100;
-  let target = null;
-
-  if (selectedFishType === 'MEDIUM') {
-    if (rand < 50) {
-      target = getOppositeBlueTarget();
-    }
-  } else if (selectedFishType === 'LARGE') {
-    if (rand < 20) {
-      target = getOppositeBlueTarget();
-    } else if (rand < 30) {
-      target = getOppositeRedTarget();
-    }
-  } else if (selectedFishType === 'HUGE') {
-    if (rand < 20) {
-      target = getOppositeBlueTarget();
-    } else if (rand < 40) {
-      target = getOppositeRedTarget();
-    }
-  }
-
-  if (target !== null) {
-    tension = target;
-    tensionVelocity = 0;
-    redZoneActionTimer = 3.0;
-  }
-}
-
-function isTensionInRedZone() {
-  return tension <= 25 || tension >= 75;
-}
-
-function getActiveTouchZoneFromTension() {
-  if (tension <= 25) {
-    return { side: 'left', color: 'red' };
-  }
-  if (tension > 25 && tension < 35) {
-    return { side: 'left', color: 'blue' };
-  }
-  if (tension > 65 && tension < 75) {
-    return { side: 'right', color: 'blue' };
-  }
-  if (tension >= 75) {
-    return { side: 'right', color: 'red' };
-  }
-  return null;
-}
-
-function getRedTensionSide() {
-  if (tension <= 25) {
-    return 'left';
-  }
-  if (tension >= 75) {
-    return 'right';
-  }
-  return null;
-}
-
-function isPointerInsideElement(clientX, clientY, element) {
-  const rect = element.getBoundingClientRect();
-  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-}
-
-function updateZoneTouchState(clientX, clientY) {
-  isTouchingActiveZone = false;
-  const activeZone = getActiveTouchZoneFromTension();
-  if (!activeZone) {
-    return;
-  }
-
-  const targetEl = activeZone.side === 'left' ? elFightTouchLeft : elFightTouchRight;
-  if (!targetEl) return;
-
-  if (isPointerInsideElement(clientX, clientY, targetEl)) {
-    isTouchingActiveZone = true;
-    if (!hasActivatedZone) {
-      const delta = tension < 50 ? 10 : -10;
-      tension = Math.max(0, Math.min(100, tension + delta));
-      tensionVelocity = 0;
-      updateTensionUI();
-      playSound(520, 0.08, 'triangle');
-      vibrate(20);
-      hasActivatedZone = true;
-    }
-  }
-}
-
-function shouldReturnLine() {
-  if (!isMediumOrLarger() || currentState !== STATE.FIGHT) return false;
-
-  if (isTouchingActiveZone) {
-    return false;
-  }
-
-  if (!isFightTouchActive) {
-    return true;
-  }
-
-  if (!isTensionInRedZone()) {
-    return false;
-  }
-
-  const targetSide = getRedTensionSide();
-  return fightTouchSide !== targetSide;
-}
-
-function applyReturnLine(dt) {
-  if (!shouldReturnLine()) return false;
-
-  const returnSpeed = 0.6; // m per second
-  distance += returnSpeed * dt;
-  distance = Math.min(distance, 15.0);
-  updateDistanceMeter();
-
-  if (distance >= 15.0) {
-    fishRanAway();
-    return true;
-  }
-
-  return false;
-}
-
-function fishRanAway() {
-  currentState = STATE.RESULT;
-  playSound(180, 0.4, 'sawtooth');
-  vibrate([80, 40, 80]);
-  
-  document.getElementById('result-title').innerText = '逃げられた...';
-  document.getElementById('res-name').innerText = '逃げられてしまった...';
-  document.getElementById('res-length').innerText = '-';
-  document.getElementById('res-weight').innerText = '-';
-  
-  elImgResult.style.display = 'none';
-  elCanvasResult.style.display = 'block';
-  const ctx = elCanvasResult.getContext('2d');
-  ctx.clearRect(0, 0, elCanvasResult.width, elCanvasResult.height);
-  
-  changeState(STATE.RESULT);
-}
-
-function checkAreaRuleViolation() {
-  return false;
-}
-
-function handleAreaRuleViolation() {
-  return false;
-}
 
 const fishShadowLeft = new Image();
 fishShadowLeft.src = 'fish_shadow.png';
 const fishShadowRight = new Image();
 fishShadowRight.src = 'fish_shadow2.png';
-const trashFightImage = new Image();
-trashFightImage.src = '3a058364-9de6-4db6-af61-16094564de18 - 2.png';
-const trashResultImage = new Image();
-trashResultImage.src = '3a058364-9de6-4db6-af61-16094564de18.png';
 
 function fightLoop(timestamp) {
   if (currentState !== STATE.FIGHT) return;
@@ -818,17 +1012,16 @@ function fightLoop(timestamp) {
 
   // エリア追跡と滞在時間管理
   updateAreaTracking(dt);
-  updateAreaTimerUI();
 
-  // MEDIUM以上の戻し処理
-  if (applyReturnLine(dt)) {
-    return;
-  }
-
-  // ルール違反チェック
-  if (checkAreaRuleViolation()) {
-    handleAreaRuleViolation();
-    return;
+  // HUGE魚の赤エリア強制移動ロジック（魚の動きのロジック）
+  if (selectedFishType === 'HUGE' && currentArea === AREA.RED) {
+    if (playerPos > 65) {
+      playerPos = Math.max(65, playerPos - 30);
+      areaStayTime = 0;
+    } else if (playerPos < 35) {
+      playerPos = Math.min(35, playerPos + 30);
+      areaStayTime = 0;
+    }
   }
 
   if (selectedFishType === 'HUGE') {
@@ -882,14 +1075,15 @@ function fightLoop(timestamp) {
   tension += tensionVelocity * dt;
   tension = Math.max(0, Math.min(100, tension));
 
-  if (redZoneActionTimer > 0) {
-    redZoneActionTimer = Math.max(0, redZoneActionTimer - dt);
-  }
-
-  applyTouchReturnToWhite(dt);
-  updateTensionAreaTracking();
-  if (previousTensionArea !== tensionArea && tensionArea === AREA.RED) {
-    handleTensionRedEntry();
+  if (!isPressing && canFishPullLineBack()) {
+    distance += dt * 2.1;
+    if (distance >= 15.0) {
+      distance = 15.0;
+      updateDistanceMeter();
+      escapeFromFight();
+      return;
+    }
+    updateDistanceMeter();
   }
 
   updateTensionUI();
@@ -933,21 +1127,37 @@ function updateTensionUI() {
   if (pointer) {
     pointer.style.left = `${tension}%`;
   }
-  updateTouchZoneGlow();
-}
 
-function updateTouchZoneGlow() {
-  if (!elFightTouchLeft || !elFightTouchRight) return;
-  elFightTouchLeft.className = 'fight-touch-zone left';
-  elFightTouchRight.className = 'fight-touch-zone right';
-
-  const activeZone = getActiveTouchZoneFromTension();
-  if (!activeZone) {
+  // ★ FIGHT状態でのみglow更新（他の状態では一切更新しない）
+  if (currentState !== STATE.FIGHT) {
     return;
   }
 
-  const element = activeZone.side === 'left' ? elFightTouchLeft : elFightTouchRight;
-  element.classList.add('active', `glow-${activeZone.color}`);
+  // テンションに応じてfight-touch-zoneのglowを更新
+  if (elFightTouchLeft && elFightTouchRight) {
+    // クラス名を全削除してから、テンション位置に対応する片側だけを光らせる
+    elFightTouchLeft.classList.remove('glow-red', 'glow-blue', 'glow-white', 'active');
+    elFightTouchRight.classList.remove('glow-red', 'glow-blue', 'glow-white', 'active');
+
+    if (tension <= 25) {
+      elFightTouchLeft.classList.add('glow-red', 'active');
+    } else if (tension > 25 && tension < 35) {
+      elFightTouchLeft.classList.add('glow-blue', 'active');
+    } else if (tension > 65 && tension < 75) {
+      elFightTouchRight.classList.add('glow-blue', 'active');
+    } else if (tension >= 75) {
+      elFightTouchRight.classList.add('glow-red', 'active');
+    } else {
+      elFightTouchLeft.classList.add('glow-white');
+      elFightTouchRight.classList.add('glow-white');
+    }
+
+    if (tension < 35) {
+      elFightTouchLeft.classList.add('active');
+    } else if (tension > 65) {
+      elFightTouchRight.classList.add('active');
+    }
+  }
 }
 
 // --- リアルなブラックバスのCanvas描画 (ファイト中) ---
@@ -958,19 +1168,7 @@ function drawFishCanvas() {
 
   const fish = FISH_DATA[selectedFishType];
   if (fish.isTrash) {
-    if (trashFightImage.complete && trashFightImage.naturalWidth > 0) {
-      const maxWidth = canvas.width * 0.85;
-      const maxHeight = canvas.height * 0.85;
-      const resultScale = 0.5;
-      let drawWidth = trashFightImage.naturalWidth;
-      let drawHeight = trashFightImage.naturalHeight;
-      const ratio = Math.min(maxWidth / drawWidth, maxHeight / drawHeight, 1);
-      drawWidth *= ratio * resultScale;
-      drawHeight *= ratio * resultScale;
-      ctx.drawImage(trashFightImage, (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
-    } else {
-      drawTrash(ctx, canvas.width / 2, canvas.height / 2);
-    }
+    drawTrash(ctx, canvas.width / 2, canvas.height / 2);
     return;
   }
 
@@ -1123,28 +1321,70 @@ function drawRealisticBass(ctx, x, y, width, height, angle) {
 
 // 空き缶の描画
 function drawTrash(ctx, x, y) {
-  const scale = 0.5;
   ctx.save();
   ctx.translate(x, y);
-  ctx.scale(scale, scale);
-  ctx.fillStyle = '#78716c';
-  ctx.shadowBlur = 0;
   
-  ctx.fillRect(-22, -32, 44, 64);
-  
-  ctx.fillStyle = '#451a03';
-  ctx.fillRect(-12, -10, 10, 15);
-  ctx.fillRect(5, 12, 12, 10);
-  
-  ctx.fillStyle = '#44403c';
-  ctx.fillRect(-24, -34, 48, 4);
-  ctx.fillRect(-24, 30, 48, 4);
-  
-  ctx.strokeStyle = '#a8a29e';
-  ctx.lineWidth = 2;
+  // 缶の本体（グラデーション）
+  const gradient = ctx.createLinearGradient(-24, -34, 24, 30);
+  gradient.addColorStop(0, '#9d9590');
+  gradient.addColorStop(0.5, '#7a7570');
+  gradient.addColorStop(1, '#5a5550');
+  ctx.fillStyle = gradient;
   ctx.beginPath();
-  ctx.arc(-4, -38, 5, 0, Math.PI * 2);
+  ctx.moveTo(-24, -28);
+  ctx.quadraticCurveTo(-26, -34, -20, -38);
+  ctx.lineTo(20, -38);
+  ctx.quadraticCurveTo(26, -34, 24, -28);
+  ctx.lineTo(24, 28);
+  ctx.quadraticCurveTo(26, 32, 20, 34);
+  ctx.lineTo(-20, 34);
+  ctx.quadraticCurveTo(-26, 32, -24, 28);
+  ctx.closePath();
+  ctx.fill();
+  
+  // 缶の上部（開口部）
+  ctx.fillStyle = '#2a2520';
+  ctx.beginPath();
+  ctx.ellipse(0, -38, 22, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // 缶の上部の光沢
+  ctx.fillStyle = '#c4b5a0';
+  ctx.beginPath();
+  ctx.ellipse(-12, -38, 8, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // プルトップ（ツル）
+  ctx.strokeStyle = '#5a5550';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(6, -40, 4, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.fillStyle = '#9d9590';
+  ctx.fill();
+  
+  // プルトップの装飾
+  ctx.strokeStyle = '#c4b5a0';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(6, -40, 2.5, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  // ロゴエリア（模様）
+  ctx.fillStyle = '#e8d4c0';
+  ctx.fillRect(-16, -6, 32, 16);
+  
+  // ロゴエリアのテクスチャ
+  ctx.fillStyle = 'rgba(88, 80, 70, 0.3)';
+  for (let i = -16; i < 16; i += 4) {
+    ctx.fillRect(i, -4, 2, 12);
+  }
+  
+  // 缶の下部のエッジ
+  ctx.fillStyle = '#3a3530';
+  ctx.beginPath();
+  ctx.ellipse(0, 34, 24, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
   
   ctx.restore();
 }
@@ -1152,6 +1392,18 @@ function drawTrash(ctx, x, y) {
 // --- 逃げられた判定 ---
 // --- ランディング成功判定 ---
 function landingSuccess() {
+  const fish = FISH_DATA[selectedFishType];
+
+  if (currentGameMode === GAME_MODE.TIME_ATTACK) {
+    recordTimeAttackCatch(fish);
+    playSound(523.25, 0.06, 'sine');
+    setTimeout(() => playSound(659.25, 0.06, 'sine'), 70);
+    setTimeout(() => {
+      changeState(STATE.CAST_WAIT);
+    }, 160);
+    return;
+  }
+
   currentState = STATE.RESULT;
   
   playSound(523.25, 0.1, 'sine');
@@ -1163,8 +1415,6 @@ function landingSuccess() {
     shakeScreen();
   }, 300);
 
-  const fish = FISH_DATA[selectedFishType];
-  
   document.getElementById('result-title').innerText = 'LANDING SUCCESS!';
   document.getElementById('res-name').innerText = fish.name;
   
@@ -1172,13 +1422,14 @@ function landingSuccess() {
     document.getElementById('res-length').innerText = 'なし';
     document.getElementById('res-weight').innerText = 'なし';
     
-    // ゴミは専用画像で表示する
-    elCanvasResult.style.display = 'none';
-    elImgResult.src = trashResultImage.src;
-    elImgResult.style.width = 'auto';
-    elImgResult.style.maxWidth = '50%';
-    elImgResult.style.height = 'auto';
-    elImgResult.style.display = 'block';
+    // ゴミはCanvasで描画する
+    elImgResult.classList.add('hidden');
+    elImgResult.style.display = 'none';
+    elCanvasResult.style.display = 'block';
+    
+    const ctx = elCanvasResult.getContext('2d');
+    ctx.clearRect(0, 0, elCanvasResult.width, elCanvasResult.height);
+    drawTrash(ctx, elCanvasResult.width / 2, elCanvasResult.height / 2 + 10);
   } else {
     document.getElementById('res-length').innerText = `${fishLength} cm`;
     document.getElementById('res-weight').innerText = `${fishWeight} g`;
@@ -1195,6 +1446,7 @@ function landingSuccess() {
     elImgResult.style.width = `calc(${widthPercentage}% - 16px)`; 
     
     elCanvasResult.style.display = 'none';
+    elImgResult.classList.remove('hidden');
     elImgResult.style.display = 'block';
   }
 
@@ -1204,5 +1456,9 @@ function landingSuccess() {
 // --- リスタート ---
 document.getElementById('btn-restart').addEventListener('click', () => {
   playSound(440, 0.05);
-  changeState(STATE.CAST_WAIT);
+  if (currentGameMode === GAME_MODE.TIME_ATTACK) {
+    resetToTitle();
+  } else {
+    changeState(STATE.CAST_WAIT);
+  }
 });

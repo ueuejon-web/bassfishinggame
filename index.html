@@ -17,7 +17,7 @@
     <div id="screen-title" class="screen active">
       <div class="brand">
         <span class="sub-title">MOBILE BASS FISHING GAME</span>
-        <img class="main-title logo-image" src="IMG_9168.png" alt="タイトルロゴ">
+        <img id="title-logo" class="main-title logo-image" src="IMG_9168.png" alt="タイトルロゴ">
       </div>
       <div class="tap-to-start">
         <button id="btn-start" class="btn-primary">TAP TO START</button>
@@ -25,6 +25,39 @@
       <div class="title-footer">
         <div class="note">※音量をONにしてお楽しみください。バイブレーション機能はAndroid端末のみ対応です。</div>
         <div class="credit">Created by <a href="https://www.ueb-design.com/" target="_blank" rel="noopener noreferrer">上ブ.デザイン | CREATIVE STUDIO</a></div>
+      </div>
+    </div>
+
+    <!-- 1-2. モード選択画面 -->
+    <div id="screen-mode-select" class="screen">
+      <div class="mode-select-card">
+        <h2 class="mode-select-title">SELECT MODE</h2>
+        <p class="mode-select-caption">遊びたいモードを選んでください</p>
+        <div class="mode-buttons">
+          <button id="btn-mode-free" class="btn-primary mode-button">ＦＲＥＥ ＦＩＳＨＩＮＧ</button>
+          <button id="btn-mode-time" class="btn-primary mode-button time-mode">ＴＩＭＥ ATTACK</button>
+        </div>
+        <button id="btn-mode-back" class="btn-secondary">BACK</button>
+      </div>
+    </div>
+
+    <!-- 1-3. TIME ATTACK ルール画面 -->
+    <div id="screen-time-rules" class="screen">
+      <div class="rules-card">
+        <h2 class="rules-title">TIME ATTACK RULES</h2>
+        <p class="rules-intro">３分間でどれだけ釣れるかを競います。最後に最大サイズ、釣れた数、合計ポイントが表示されますので、友達と競い合ってみてください。</p>
+        <div class="rules-points">
+          <div class="rules-point-row"><span>ＳＭＡＬＬ</span><span>１POINT</span></div>
+          <div class="rules-point-row"><span>ＭＥＤＩＵＭ</span><span>２POINT</span></div>
+          <div class="rules-point-row"><span>ＬＡＲＧＥ</span><span>３POINT</span></div>
+          <div class="rules-point-row"><span>ＥＸＴＲＡ ＬＡＲＧＥ</span><span>４POINT</span></div>
+          <div class="rules-point-row"><span>６０ｃｍ</span><span>１０POINT</span></div>
+          <div class="rules-point-row"><span>空き缶</span><span>－３POINT</span></div>
+        </div>
+        <div class="rules-actions">
+          <button id="btn-time-start" class="btn-primary">START</button>
+          <button id="btn-time-back" class="btn-secondary">BACK</button>
+        </div>
       </div>
     </div>
 
@@ -36,6 +69,24 @@
       <div id="water-surface" class="water-surface">
         <div class="ripple-hint"></div>
       </div>
+    </div>
+
+    <div id="time-attack-hud" class="time-attack-hud hidden">
+      <div class="time-attack-stat stat-left">
+        <span class="stat-label">MAX</span>
+        <span id="txt-max-length" class="stat-value">?</span>
+      </div>
+      <div class="time-attack-timer">
+        <span id="txt-time-remaining" class="timer-value">03:00</span>
+      </div>
+      <div class="time-attack-stat stat-right">
+        <span class="stat-label">CATCH</span>
+        <span id="txt-catch-count" class="stat-value">0</span>
+      </div>
+    </div>
+
+    <div id="countdown-overlay" class="countdown-overlay hidden">
+      <div id="countdown-text" class="countdown-text">3</div>
     </div>
 
     <!-- 3. ファイト画面 -->
@@ -59,12 +110,13 @@
           <canvas id="canvas-fish" width="260" height="180"></canvas>
         </div>
 
-        <!-- 下部操作エリア（テンションゲージ・タッチエリア・リール） -->
+        <!-- 下部操作エリア（テンションゲージとリールが一体化） -->
         <div class="interaction-area">
           <div class="fight-control-row">
             <div id="fight-touch-left" class="fight-touch-zone left" aria-label="左テンションエリア"></div>
 
             <div class="fight-input-group">
+              <!-- テンションゲージ（リールの真上に配置） -->
               <div id="tension-gauge-area" class="gauge-container">
                 <div class="gauge-labels">
                   <span>LINE TENSION</span>
@@ -74,6 +126,7 @@
                 </div>
               </div>
 
+              <!-- 円ジェスチャー ＆ 左右スワイプを同時に受ける操作パッド -->
               <div class="reel-panel">
                 <div id="reel-disc" class="reel-disc">
                   <div class="reel-knob"></div>
@@ -107,7 +160,7 @@
           </div>
         </div>
 
-        <div class="result-details">
+        <div id="result-details" class="result-details">
           <div class="detail-row">
             <span class="label">獲物</span>
             <span id="res-name" class="value">-</span>
@@ -119,6 +172,21 @@
           <div class="detail-row">
             <span class="label">重量</span>
             <span id="res-weight" class="value">-</span>
+          </div>
+        </div>
+
+        <div id="time-attack-summary" class="time-attack-summary hidden">
+          <div class="summary-row">
+            <span class="label">最大サイズ</span>
+            <span id="ta-max-length" class="value">-</span>
+          </div>
+          <div class="summary-row">
+            <span class="label">釣れた数</span>
+            <span id="ta-catch-count" class="value">-</span>
+          </div>
+          <div class="summary-row">
+            <span class="label">合計ポイント</span>
+            <span id="ta-total-points" class="value">-</span>
           </div>
         </div>
 
